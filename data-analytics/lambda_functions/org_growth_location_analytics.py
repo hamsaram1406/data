@@ -129,39 +129,45 @@ def handler(event, org_df, states_df, countries_df):
     if not valid_trend or not valid_loc:
         return {"statusCode": 400, "body": {"error": "Invalid date format or start_date after end_date"}}
 
-    response = {}
+    has_trend_custom = trend_start is not None and trend_end is not None
+    has_loc_custom = loc_start is not None and loc_end is not None
+    is_custom = has_trend_custom or has_loc_custom
 
-    for time_key in ["7D", "30D", "1Y", "All"]:
-        window_df = filter_by_window(org_df, time_key)
-        grouping = get_grouping_format(time_key)
+    if is_custom:
+        custom_growth = {"total_organizations": [], "collaborators": []}
+        custom_location = []
 
-        growth = build_growth_trend(org_df, window_df, grouping)
-        location = build_orgs_by_location(window_df, states_df, countries_df)
+        if has_trend_custom:
+            trend_window = org_df[
+                (org_df["created_at"] >= trend_start) & (org_df["created_at"] <= trend_end)
+            ]
+            custom_growth = build_growth_trend(org_df, trend_window, "day")
 
-        response[time_key] = {
-            "growth_trend": growth,
-            "organizations_by_location": location
+        if has_loc_custom:
+            loc_window = org_df[
+                (org_df["created_at"] >= loc_start) & (org_df["created_at"] <= loc_end)
+            ]
+            custom_location = build_orgs_by_location(loc_window, states_df, countries_df)
+
+        response = {
+            "Custom": {
+                "growth_trend": custom_growth,
+                "organizations_by_location": custom_location
+            }
         }
+    else:
+        response = {}
+        for time_key in ["7D", "30D", "1Y", "All"]:
+            window_df = filter_by_window(org_df, time_key)
+            grouping = get_grouping_format(time_key)
 
-    custom_growth = {"total_organizations": [], "collaborators": []}
-    custom_location = []
+            growth = build_growth_trend(org_df, window_df, grouping)
+            location = build_orgs_by_location(window_df, states_df, countries_df)
 
-    if trend_start is not None and trend_end is not None:
-        trend_window = org_df[
-            (org_df["created_at"] >= trend_start) & (org_df["created_at"] <= trend_end)
-        ]
-        custom_growth = build_growth_trend(org_df, trend_window, "day")
-
-    if loc_start is not None and loc_end is not None:
-        loc_window = org_df[
-            (org_df["created_at"] >= loc_start) & (org_df["created_at"] <= loc_end)
-        ]
-        custom_location = build_orgs_by_location(loc_window, states_df, countries_df)
-
-    response["Custom"] = {
-        "growth_trend": custom_growth,
-        "organizations_by_location": custom_location
-    }
+            response[time_key] = {
+                "growth_trend": growth,
+                "organizations_by_location": location
+            }
 
     return {"statusCode": 200, "body": response}
 
@@ -199,25 +205,31 @@ class TestGrowthLocationAPI(unittest.TestCase):
         ))
         cls.countries_df["country_id"] = pd.to_numeric(cls.countries_df["country_id"])
 
-    def test_no_body(self):
+    def test_no_body_returns_four_keys(self):
         result = handler({}, self.org_df, self.states_df, self.countries_df)
         self.assertEqual(result["statusCode"], 200)
-        body = result["body"]
-        for key in ["7D", "30D", "1Y", "All", "Custom"]:
-            self.assertIn(key, body)
-            self.assertIn("growth_trend", body[key])
-            self.assertIn("organizations_by_location", body[key])
-            self.assertIn("total_organizations", body[key]["growth_trend"])
-            self.assertIn("collaborators", body[key]["growth_trend"])
+        self.assertEqual(set(result["body"].keys()), {"7D", "30D", "1Y", "All"})
 
-    def test_custom_empty_when_no_dates(self):
+    def test_no_body_has_no_custom_key(self):
         result = handler({}, self.org_df, self.states_df, self.countries_df)
-        custom = result["body"]["Custom"]
-        self.assertEqual(custom["growth_trend"]["total_organizations"], [])
-        self.assertEqual(custom["growth_trend"]["collaborators"], [])
-        self.assertEqual(custom["organizations_by_location"], [])
+        self.assertNotIn("Custom", result["body"])
 
-    def test_custom_trend_only(self):
+    def test_each_bucket_has_both_charts(self):
+        result = handler({}, self.org_df, self.states_df, self.countries_df)
+        for key in ["7D", "30D", "1Y", "All"]:
+            self.assertIn("growth_trend", result["body"][key])
+            self.assertIn("organizations_by_location", result["body"][key])
+            self.assertIn("total_organizations", result["body"][key]["growth_trend"])
+            self.assertIn("collaborators", result["body"][key]["growth_trend"])
+
+    def test_custom_trend_only_returns_custom_key(self):
+        result = handler(
+            {"start_date": "2026-01-01", "end_date": "2026-03-31"},
+            self.org_df, self.states_df, self.countries_df
+        )
+        self.assertEqual(set(result["body"].keys()), {"Custom"})
+
+    def test_custom_trend_only_populates_growth(self):
         result = handler(
             {"start_date": "2026-01-01", "end_date": "2026-03-31"},
             self.org_df, self.states_df, self.countries_df
@@ -226,7 +238,14 @@ class TestGrowthLocationAPI(unittest.TestCase):
         self.assertGreater(len(custom["growth_trend"]["total_organizations"]), 0)
         self.assertEqual(custom["organizations_by_location"], [])
 
-    def test_custom_location_only(self):
+    def test_custom_location_only_returns_custom_key(self):
+        result = handler(
+            {"location_start_date": "2026-01-01", "location_end_date": "2026-03-31"},
+            self.org_df, self.states_df, self.countries_df
+        )
+        self.assertEqual(set(result["body"].keys()), {"Custom"})
+
+    def test_custom_location_only_populates_location(self):
         result = handler(
             {"location_start_date": "2026-01-01", "location_end_date": "2026-03-31"},
             self.org_df, self.states_df, self.countries_df
@@ -243,6 +262,7 @@ class TestGrowthLocationAPI(unittest.TestCase):
             },
             self.org_df, self.states_df, self.countries_df
         )
+        self.assertEqual(set(result["body"].keys()), {"Custom"})
         custom = result["body"]["Custom"]
         self.assertGreater(len(custom["growth_trend"]["total_organizations"]), 0)
         self.assertGreater(len(custom["organizations_by_location"]), 0)
@@ -285,7 +305,7 @@ class TestGrowthLocationAPI(unittest.TestCase):
 
     def test_location_max_4_rows(self):
         result = handler({}, self.org_df, self.states_df, self.countries_df)
-        for key in ["7D", "30D", "1Y", "All", "Custom"]:
+        for key in result["body"]:
             loc = result["body"][key]["organizations_by_location"]
             self.assertLessEqual(len(loc), 4)
 
@@ -313,7 +333,7 @@ class TestGrowthLocationAPI(unittest.TestCase):
         empty_df = self.org_df.iloc[0:0].copy()
         result = handler({}, empty_df, self.states_df, self.countries_df)
         self.assertEqual(result["statusCode"], 200)
-        for key in ["7D", "30D", "1Y", "All", "Custom"]:
+        for key in ["7D", "30D", "1Y", "All"]:
             self.assertEqual(result["body"][key]["growth_trend"]["total_organizations"], [])
             self.assertEqual(result["body"][key]["organizations_by_location"], [])
 
@@ -322,13 +342,9 @@ class TestGrowthLocationAPI(unittest.TestCase):
         result = handler({}, single_df, self.states_df, self.countries_df)
         self.assertEqual(result["statusCode"], 200)
 
-    def test_exactly_five_keys(self):
-        result = handler({}, self.org_df, self.states_df, self.countries_df)
-        self.assertEqual(set(result["body"].keys()), {"7D", "30D", "1Y", "All", "Custom"})
-
     def test_no_extra_keys_in_bucket(self):
         result = handler({}, self.org_df, self.states_df, self.countries_df)
-        for key in ["7D", "30D", "1Y", "All", "Custom"]:
+        for key in result["body"]:
             self.assertEqual(set(result["body"][key].keys()), {"growth_trend", "organizations_by_location"})
 
     def test_invalid_location_dates(self):
