@@ -76,7 +76,7 @@ def filter_by_date(organizations, time_range,
         ].copy()
 
     elif time_range == "1Y":
-        cutoff = today - pd.DateOffset(years=1)
+        cutoff = today - pd.Timedelta(days=364)
         return organizations[
             organizations["created_at"] >= cutoff
         ].copy()
