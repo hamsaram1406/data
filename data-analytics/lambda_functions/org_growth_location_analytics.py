@@ -4,15 +4,11 @@ import os
 import pandas as pd
 
 
-# ---------------------------------------------------------------------------
-# CSV data directory — CSVs are bundled in the same Lambda deployment package.
-# ---------------------------------------------------------------------------
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "mock_data")
 
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
+
 
 def load_data():
     """Load and prepare the three CSV files bundled with this Lambda."""
@@ -35,9 +31,6 @@ def load_data():
     return org_df, states_df, countries_df
 
 
-# ---------------------------------------------------------------------------
-# Date validation and filtering
-# ---------------------------------------------------------------------------
 
 def validate_date_pair(start, end):
     """Validate a start/end date pair. Returns (valid, start_ts, end_ts)."""
@@ -69,9 +62,7 @@ def filter_by_window(df, time_key):
     return df
 
 
-# ---------------------------------------------------------------------------
-# Grouping and trend building
-# ---------------------------------------------------------------------------
+
 
 def get_grouping_format(time_key):
     """Return 'day' or 'month' grouping based on the time window."""
@@ -158,9 +149,7 @@ def build_orgs_by_location(window_df, states_df, countries_df):
     ]
 
 
-# ---------------------------------------------------------------------------
-# AWS Lambda handler
-# ---------------------------------------------------------------------------
+
 
 def lambda_handler(event, context):
     """AWS Lambda entry point for org growth & location analytics.
